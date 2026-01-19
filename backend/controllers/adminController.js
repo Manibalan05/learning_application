@@ -99,7 +99,7 @@ const getAllSubmissions = async (req, res) => {
             collectionId,
             [
                 Query.limit(100),
-                Query.orderDesc('createdAt')
+                Query.orderDesc('$createdAt')
             ]
         );
 

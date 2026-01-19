@@ -67,7 +67,7 @@ const ProblemSolve = () => {
 
         } catch (error) {
             console.error('Submission error:', error);
-            setStatus('Error: ' + (error.response?.data?.error || error.message));
+            setStatus('Error: ' + (error.response?.data?.message || error.response?.data?.error || error.message));
         } finally {
             setIsSubmitting(false);
         }
