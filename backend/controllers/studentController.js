@@ -78,7 +78,8 @@ const submitProblem = async (req, res) => {
             code,
             pasteCount,      // Optional
             timeSpentMs,     // Optional
-            totalKeyPresses  // Optional 
+            totalKeyPresses, // Optional
+            isFinalSubmission // Optional - true for Submit button, false/undefined for Run button
         } = req.body;
 
         // 1. Basic Validation
@@ -144,50 +145,58 @@ const submitProblem = async (req, res) => {
         // Check success
         let isSuccess = false;
         if (testCases.length > 0) {
-            const expectedOutput = testCases[0].output.trim();
+            const expectedOutput = testCases[0].output.toString().trim();
             const actualOutput = stdout.trim();
+            
+            console.log('Comparing outputs:');
+            console.log('Expected:', JSON.stringify(expectedOutput));
+            console.log('Actual:', JSON.stringify(actualOutput));
+            console.log('Status:', status);
+            
+            // More lenient comparison - check if outputs match
             if (status === 'Accepted' && actualOutput === expectedOutput) {
                 isSuccess = true;
             }
         } else {
              isSuccess = status === 'Accepted';
         }
+        
+        console.log('Final isSuccess:', isSuccess);
 
-        // 6. Save Submission to Appwrite
-        // Test with minimal data first to identify the issue
-        const submissionData = {
-            userId: userId,
-            problemId: problemId,
-            language: language,
-            code: code.substring(0, 100), // Truncate to avoid size issues
-            executionTime: parseFloat(executionTime) || 0.0,
-            aiscore: parseInt(aiScore) || 0,  // Changed from aiScore to aiscore
-            status: status || 'Unknown', 
-            output: (stdout || stderr || compileOutput || '').substring(0, 100)
-        };
+        // 6. Save Submission to Appwrite (only for final submissions)
+        let submissionId = null;
+        
+        if (isFinalSubmission) {
+            const submissionData = {
+                userId: userId,
+                problemId: problemId,
+                language: language,
+                code: code, // Save full code for final submission
+                executionTime: parseFloat(executionTime) || 0.0,
+                aiscore: parseInt(aiScore) || 0,
+                status: status || 'Unknown', 
+                output: (stdout || stderr || compileOutput || '')
+            };
 
-        console.log('Attempting to save submission with types:', {
-            userId: typeof userId,
-            problemId: typeof problemId,
-            language: typeof language,
-            code: typeof submissionData.code,
-            executionTime: typeof submissionData.executionTime,
-            aiScore: typeof submissionData.aiscore,
-            status: typeof submissionData.status,
-            output: typeof submissionData.output
-        });
-        console.log('Submission data:', submissionData);
+            console.log('Saving final submission:', submissionData);
 
-        const newSubmission = await databases.createDocument(
-            process.env.APPWRITE_DATABASE_ID,
-            'submissions', 
-            ID.unique(),
-            submissionData
-        );
+            const newSubmission = await databases.createDocument(
+                process.env.APPWRITE_DATABASE_ID,
+                'submissions', 
+                ID.unique(),
+                submissionData
+            );
+            
+            submissionId = newSubmission.$id;
+        } else {
+            console.log('Test run - not saving to database');
+        }
+
 
         return res.status(201).json({
-            message: 'Code submitted and executed',
-            submissionId: newSubmission.$id,
+            message: isFinalSubmission ? 'Solution submitted successfully' : 'Code executed (test run)',
+            submissionId: submissionId,
+            isFinalSubmission: isFinalSubmission || false,
             executionResult: {
                 status,
                 time: executionTime,
@@ -261,4 +270,54 @@ const getStudentSubmissions = async (req, res) => {
     }
 };
 
-module.exports = { getAllProblems, submitProblem, getStudentSubmissions };
+
+const submitCode = async (req, res) => {
+    try {
+        const userId = req.headers['user-id'];
+        const { problemId, language, code } = req.body;
+
+        // 1. Validations
+        if (!userId) return res.status(401).json({ error: 'Unauthorized: Missing User ID' });
+        if (!problemId || !language || !code) return res.status(400).json({ error: 'All fields (problemId, language, code) are required' });
+
+        // 2. Verify User is Student
+        const user = await users.get(userId);
+        const isStudent = user.labels && user.labels.includes('student');
+        if (!isStudent) {
+            // For demo flexibility we generally allowed it, but Requirement is STRICT here.
+            return res.status(403).json({ error: 'Forbidden: Only students can submit code' });
+        }
+
+        // 3. Store Submission
+        // Note: providing default values for fields required by existing schema but not relevant to this flow
+        const submissionData = {
+            userId,
+            problemId,
+            language,
+            code,
+            status: 'Submitted',     // Default status
+            output: 'N/A',           // No execution output
+            executionTime: 0.0,      // No execution
+            aiscore: 0               // No AI analysis
+        };
+
+        const newSubmission = await databases.createDocument(
+            process.env.APPWRITE_DATABASE_ID,
+            'submissions',
+            ID.unique(),
+            submissionData
+        );
+
+        return res.status(201).json({
+            message: 'Code submitted successfully',
+            submissionId: newSubmission.$id,
+            createdAt: newSubmission.$createdAt
+        });
+
+    } catch (error) {
+        console.error('Submit Code Error:', error);
+        return res.status(500).json({ error: 'Internal Server Error', message: error.message });
+    }
+};
+
+module.exports = { getAllProblems, submitProblem, getStudentSubmissions, submitCode };

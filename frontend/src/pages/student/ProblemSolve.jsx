@@ -38,11 +38,12 @@ const ProblemSolve = () => {
         console.warn('Paste event detected');
     };
 
-    // --- SUBMISSION HANDLER ---
-    const handleSubmit = async () => {
+
+    // --- RUN CODE HANDLER (Test Only) ---
+    const handleRun = async () => {
         setIsSubmitting(true);
         setStatus('Executing...');
-        setExecutionResult(null); // Reset previous result
+        setExecutionResult(null);
 
         try {
             const user = await account.get();
@@ -54,7 +55,8 @@ const ProblemSolve = () => {
                 code,
                 pasteCount: pasteCountRef.current,
                 timeSpentMs,
-                totalKeyPresses: keyPressesRef.current 
+                totalKeyPresses: keyPressesRef.current,
+                isFinalSubmission: false  // Test run only
             };
 
             const response = await axios.post('http://localhost:5000/student/submit', payload, {
@@ -63,7 +65,38 @@ const ProblemSolve = () => {
 
             const result = response.data.executionResult;
             setExecutionResult(result);
-            setStatus(result.passed ? 'Success' : 'Failed');
+            setStatus(result.passed ? 'Test Passed - Ready to Submit!' : 'Test Failed');
+
+        } catch (error) {
+            console.error('Run error:', error);
+            setStatus('Error: ' + (error.response?.data?.message || error.response?.data?.error || error.message));
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    // --- FINAL SUBMISSION HANDLER ---
+    const handleSubmit = async () => {
+        setIsSubmitting(true);
+        setStatus('Submitting your solution...');
+
+        try {
+            const user = await account.get();
+
+            const payload = {
+                problemId: problem.problemId,
+                language,
+                code
+            };
+
+            const response = await axios.post('http://localhost:5000/student/submit-code', payload, {
+                headers: { 'user-id': user.$id }
+            });
+
+            setStatus('✅ Code submitted successfully!');
+            setTimeout(() => {
+                navigate('/student/submissions');
+            }, 2000);
 
         } catch (error) {
             console.error('Submission error:', error);
@@ -117,6 +150,19 @@ const ProblemSolve = () => {
                     </select>
                     
                     <button 
+                        onClick={handleRun} 
+                        disabled={isSubmitting} 
+                        className="btn" 
+                        style={{ 
+                            background: isSubmitting ? 'var(--text-secondary)' : 'var(--accent)', 
+                            color: '#000',
+                            minWidth: '120px'
+                        }}
+                    >
+                        {isSubmitting ? 'Running...' : 'Run Code'}
+                    </button>
+
+                    <button 
                         onClick={handleSubmit} 
                         disabled={isSubmitting} 
                         className="btn" 
@@ -126,7 +172,7 @@ const ProblemSolve = () => {
                             minWidth: '120px'
                         }}
                     >
-                        {isSubmitting ? 'Running...' : 'Run Code'}
+                        Submit Solution
                     </button>
                 </div>
             </div>

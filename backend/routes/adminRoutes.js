@@ -5,7 +5,10 @@ const { addProblem, getAllSubmissions } = require('../controllers/adminControlle
 // Route: POST /admin/add-problem
 router.post('/add-problem', addProblem);
 
-// Route: GET /admin/submissions
+// Route: GET /admin/submissions (alias)
 router.get('/submissions', getAllSubmissions);
+
+// Route: GET /admin/view-submissions (Strict requirement)
+router.get('/view-submissions', getAllSubmissions);
 
 module.exports = router;
