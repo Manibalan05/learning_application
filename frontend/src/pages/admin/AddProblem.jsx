@@ -7,7 +7,7 @@ const AddProblem = () => {
         title: '',
         description: '',
         difficulty: 'easy',
-        testcases: '' // User inputs JSON string or we parse simplistic format
+        testCases: '' // User inputs JSON string or we parse simplistic format
     });
     const [status, setStatus] = useState('');
 
@@ -27,9 +27,9 @@ const AddProblem = () => {
             // Prepare Request
             // Note: We expect testCases to be a JSON string like [{"input": "...", "output": "..."}]
             // Ideally we validate JSON here.
-            let parsedTestcases;
+            let parsedTestCases;
             try {
-                parsedTestcases = JSON.parse(formData.testcases);
+                parsedTestCases = JSON.parse(formData.testCases);
             } catch (err) {
                 setStatus('Error: Test Cases must be valid JSON');
                 return;
@@ -37,15 +37,18 @@ const AddProblem = () => {
 
             const payload = {
                 ...formData,
-                testcases: parsedTestcases
+                testCases: JSON.stringify(parsedTestCases)
             };
 
             const response = await axios.post('http://localhost:5000/admin/add-problem', payload, {
-                headers: { 'user-id': userId }
+                headers: {
+                    'Content-Type': 'application/json',
+                    'user-id': userId
+                }
             });
 
             setStatus('Problem Added Successfully!');
-            setFormData({ title: '', description: '', difficulty: 'easy', testcases: '' });
+            setFormData({ title: '', description: '', difficulty: 'easy', testCases: '' });
 
         } catch (error) {
             console.error(error);
@@ -89,8 +92,8 @@ const AddProblem = () => {
                         Example: {'[{"input": "1 2", "output": "3"}]'}
                     </p>
                     <textarea 
-                        name="testcases" 
-                        value={formData.testcases} 
+                        name="testCases" 
+                        value={formData.testCases} 
                         onChange={handleChange} 
                         placeholder='[{"input": "...", "output": "..."}]' 
                         rows={5}

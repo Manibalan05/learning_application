@@ -7,6 +7,10 @@ const addProblem = async (req, res) => {
         const userId = req.headers['user-id']; // Expecting user ID in headers
         const { title, description, difficulty, testCases } = req.body;
 
+        console.log('addProblem called with body:', req.body);
+        console.log('testCases type:', typeof testCases, 'isArray:', Array.isArray(testCases));
+
+
         // 2. Validate Input
         if (!userId) {
             return res.status(401).json({ error: 'Unauthorized: Missing User ID' });
@@ -35,14 +39,14 @@ const addProblem = async (req, res) => {
         // description (string)
         // difficulty (enum: easy, medium, hard) - frontend sends lowercase
         // testCases (string) - we must valid JSON string 
-        // createdBy (string)
+
         
         const data = {
             title,
             description,
             difficulty, 
-            testCases: JSON.stringify(testCases), // Storing array/object as JSON String
-            createdBy: userId // Adding the missing column!
+            testCases: testCases, // Store array/object directly
+            
         };
 
         const newProblem = await databases.createDocument(
