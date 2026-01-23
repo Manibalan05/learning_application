@@ -8,6 +8,8 @@
   --border: #334155;
   --danger: #ef4444;
   --success: #22c55e;
+  --warning: #f59e0b; /* Higher contrast yellow/orange */
+  --warning-text: #fffbeb; /* Light text for warning backgrounds */
 }
 
 body {

@@ -8,33 +8,16 @@ const AdminLayout = () => {
     const handleLogout = async () => {
         try {
             await account.deleteSession('current');
+            localStorage.clear(); // Ensure all local data is cleared
             navigate('/login');
         } catch (error) {
             console.error('Logout failed', error);
-            // Force redirect even if API fails
+            localStorage.clear();
             navigate('/login');
         }
     };
 
-    React.useEffect(() => {
-        const verifyAdmin = async () => {
-            try {
-                const user = await account.get();
-                // Basic check - in production use strictly backend cookies/jwt validation
-                if (!user.labels || !user.labels.includes('admin')) {
-                    // navigate('/login'); // Or unauthorized page
-                    // For development/demo, allowing access if just logged in might be easier if labels aren't set yet.
-                    // But requirement says "Restrict access".
-                    // I will log and potentially redirect.
-                    console.warn('User is not admin');
-                    // navigate('/login'); // Uncomment to enforce
-                }
-            } catch (error) {
-                navigate('/login');
-            }
-        };
-        verifyAdmin();
-    }, [navigate]);
+    // Auth check is now handled by ProtectedRoute wrapper in App.jsx
 
     const linkStyle = {
         display: 'block',

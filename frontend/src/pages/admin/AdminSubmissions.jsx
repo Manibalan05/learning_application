@@ -1,7 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, Suspense, lazy } from 'react';
 import axios from 'axios';
 import { account } from '../../lib/appwrite';
-import Editor from '@monaco-editor/react';
+
+// Lazy load heavy editor component
+const Editor = lazy(() => import('@monaco-editor/react'));
 
 const AdminSubmissions = () => {
     const [submissions, setSubmissions] = useState([]);
@@ -13,32 +15,43 @@ const AdminSubmissions = () => {
     const [filterName, setFilterName] = useState('');
     const [filterAi, setFilterAi] = useState('all'); // all, high, medium, low
 
-    useEffect(() => {
-        const fetchSubmissions = async () => {
-            try {
-                const user = await account.get();
-                const headers = { 'user-id': user.$id };
-                
-                // Fetch all student submissions
-                const res = await axios.get('http://localhost:5000/admin/submissions', { headers });
-                
-                // DATA NORMALIZATION: Handle aiScore vs aiscore mismatch
-                const normalizedSubmissions = res.data.submissions.map(sub => ({
-                    ...sub,
-                    aiScore: sub.aiScore !== undefined ? sub.aiScore : (sub.aiscore !== undefined ? sub.aiscore : 0)
-                }));
+    const [error, setError] = useState(null); // Add error state
+ 
+     useEffect(() => {
+         const fetchSubmissions = async () => {
+             document.title = "Submissions | Admin Panel"; // SEO: Update page title
+             setError(null);
+             setLoading(true);
+             try {
+                 const user = await account.get();
+                 const headers = { 'user-id': user.$id };
+                 
+                 // Fetch all student submissions
+                 const res = await axios.get('http://localhost:5000/admin/submissions', { headers });
+                 
+                 // Data Validation
+                 if (!res.data || !Array.isArray(res.data.submissions)) {
+                     throw new Error('Invalid data format received from server');
+                 }
 
-                setSubmissions(normalizedSubmissions);
-                setFilteredSubmissions(normalizedSubmissions);
+                 // If backend sent an inherent error even with 200 OK (our fail-safe)
+                 if (res.data.error) {
+                     console.warn('Backend reported issue:', res.data.error);
+                     // We can still show what we have, or show validation warning
+                 }
 
-            } catch (error) {
-                console.error('Error fetching submissions:', error);
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchSubmissions();
-    }, []);
+                 setSubmissions(res.data.submissions);
+                 setFilteredSubmissions(res.data.submissions);
+
+             } catch (error) {
+                 console.error('Error fetching submissions:', error);
+                 setError(error.response?.data?.error || 'Failed to load submissions. Is the backend running?');
+             } finally {
+                 setLoading(false);
+             }
+         };
+         fetchSubmissions();
+     }, []);
 
     // Apply Filters
     useEffect(() => {
@@ -62,11 +75,25 @@ const AdminSubmissions = () => {
 
     const getAiColor = (score) => {
         if (score < 30) return 'var(--success)';
-        if (score < 70) return 'orange';
+        if (score < 70) return 'var(--warning)';
         return 'var(--danger)';
     };
 
-    if (loading) return <div>Loading Submissions...</div>;
+    if (loading) return (
+        <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+            Loading Submissions...
+        </div>
+    );
+
+    if (error) return (
+        <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--danger)' }}>
+            <h3>Error Loading Data</h3>
+            <p>{error}</p>
+            <button onClick={() => window.location.reload()} className="btn" style={{ marginTop: '1rem', background: 'var(--bg-secondary)', color: 'white' }}>
+                Retry
+            </button>
+        </div>
+    );
 
     return (
         <div>
@@ -76,13 +103,15 @@ const AdminSubmissions = () => {
             <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', background: 'var(--bg-secondary)', padding: '1rem', borderRadius: '8px' }}>
                 <input 
                     type="text" 
+                    aria-label="Filter submissions by student name or email"
                     placeholder="Search Student Name/Email..." 
                     value={filterName}
                     onChange={(e) => setFilterName(e.target.value)}
                     style={{ flex: 1, padding: '0.5rem', borderRadius: '4px', border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'white' }}
                 />
                 <select 
-                    value={filterAi} 
+                    value={filterAi}
+                    aria-label="Filter submissions by AI score risk level" 
                     onChange={(e) => setFilterAi(e.target.value)}
                     style={{ padding: '0.5rem', borderRadius: '4px', border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'white' }}
                 >
@@ -119,7 +148,7 @@ const AdminSubmissions = () => {
                                     <td style={{ padding: '1rem' }}>{sub.problemTitle}</td>
                                     <td style={{ padding: '1rem' }}>{new Date(sub.createdAt).toLocaleDateString()}</td>
                                     <td style={{ padding: '1rem' }}>
-                                        <span style={{ color: sub.status === 'Accepted' ? 'var(--success)' : 'orange' }}>
+                                        <span style={{ color: sub.status === 'Accepted' ? 'var(--success)' : 'var(--warning)' }}>
                                             {sub.status}
                                         </span>
                                     </td>
@@ -138,6 +167,7 @@ const AdminSubmissions = () => {
                                     <td style={{ padding: '1rem' }}>
                                         <button 
                                             onClick={() => setSelectedSubmission(sub)}
+                                            aria-label={`View submission details for ${sub.userName}`}
                                             style={{ 
                                                 background: 'transparent', 
                                                 border: '1px solid var(--text-secondary)', 
@@ -159,19 +189,32 @@ const AdminSubmissions = () => {
 
             {/* View Modal */}
             {selectedSubmission && (
-                <div style={{
-                    position: 'fixed', top: 0, left: 0, width: '100%', height: '100%',
-                    background: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center',
-                    zIndex: 1000
-                }}>
+                <div 
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="modal-title"
+                    tabIndex={-1}
+                    onKeyDown={(e) => e.key === 'Escape' && setSelectedSubmission(null)}
+                    style={{
+                        position: 'fixed', top: 0, left: 0, width: '100%', height: '100%',
+                        background: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center',
+                        zIndex: 1000
+                    }}
+                >
                     <div style={{
                         width: '80%', height: '85%', background: 'var(--bg-primary)', 
                         padding: '2rem', borderRadius: '8px', border: '1px solid var(--border)',
                         display: 'flex', flexDirection: 'column'
                     }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
-                            <h2>Review Submission</h2>
-                            <button onClick={() => setSelectedSubmission(null)} style={{ background: 'none', border: 'none', color: 'white', fontSize: '1.5rem', cursor: 'pointer' }}>&times;</button>
+                            <h2 id="modal-title">Review Submission</h2>
+                            <button 
+                                onClick={() => setSelectedSubmission(null)} 
+                                aria-label="Close modal"
+                                style={{ background: 'none', border: 'none', color: 'white', fontSize: '1.5rem', cursor: 'pointer' }}
+                            >
+                                &times;
+                            </button>
                         </div>
 
                         <div style={{ display: 'flex', gap: '2rem', marginBottom: '1rem', fontSize: '0.9rem' }}>
@@ -182,13 +225,15 @@ const AdminSubmissions = () => {
                         </div>
 
                         <div style={{ flex: 1, border: '1px solid var(--border)', borderRadius: '4px', overflow: 'hidden', marginBottom: '1rem' }}>
-                             <Editor
-                                height="100%"
-                                theme="vs-dark"
-                                language={selectedSubmission.language === 'c' ? 'cpp' : selectedSubmission.language}
-                                value={selectedSubmission.code}
-                                options={{ readOnly: true, minimap: { enabled: false } }}
-                            />
+                             <Suspense fallback={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}>Loading Editor...</div>}>
+                                <Editor
+                                    height="100%"
+                                    theme="vs-dark"
+                                    language={selectedSubmission.language === 'c' ? 'cpp' : selectedSubmission.language}
+                                    value={selectedSubmission.code}
+                                    options={{ readOnly: true, minimap: { enabled: false } }}
+                                />
+                             </Suspense>
                         </div>
 
                         <div style={{ height: '150px', overflowY: 'auto' }}>

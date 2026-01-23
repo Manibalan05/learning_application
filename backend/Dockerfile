@@ -1,6 +1,9 @@
 # Use Node.js LTS (Long Term Support) image
 FROM node:20-alpine
 
+# Install Python and build dependencies for native modules and interactive execution
+RUN apk add --no-cache python3 make g++ && ln -sf python3 /usr/bin/python
+
 # Set working directory
 WORKDIR /app
 

@@ -9,6 +9,8 @@ const Login = () => {
     const [loading, setLoading] = useState(false);
     const navigate = useNavigate();
 
+    const [checkingSession, setCheckingSession] = useState(true);
+
     useEffect(() => {
         const checkSession = async () => {
             try {
@@ -16,9 +18,12 @@ const Login = () => {
                 if (user) {
                     if (user.labels && user.labels.includes('admin')) navigate('/admin');
                     else navigate('/student');
+                } else {
+                    setCheckingSession(false);
                 }
             } catch (error) {
-                // No active session, stay on login page
+                // No active session
+                setCheckingSession(false);
             }
         };
         checkSession();
@@ -57,6 +62,14 @@ const Login = () => {
             setLoading(false);
         }
     };
+
+    if (checkingSession) {
+        return (
+            <div style={{ height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-primary)' }}>
+                <div style={{ color: 'var(--text-secondary)' }}>Loading...</div>
+            </div>
+        );
+    }
 
     return (
         <div style={{ 

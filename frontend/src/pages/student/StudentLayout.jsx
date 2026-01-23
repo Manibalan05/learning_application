@@ -8,9 +8,11 @@ const StudentLayout = () => {
     const handleLogout = async () => {
         try {
             await account.deleteSession('current');
+            localStorage.clear();
             navigate('/login');
         } catch (error) {
             console.error('Logout failed', error);
+            localStorage.clear();
             navigate('/login');
         }
     };
