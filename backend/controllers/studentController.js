@@ -70,45 +70,59 @@ const submitProblem = async (req, res) => {
     try {
         const userId = req.headers['user-id'];
         
-        // Extract Metadata for AI Detection along with standard fields
-        // Frontend should now send: pasteCount, timeSpentMs, totalKeyPresses
+        // Extract Metadata
         const { 
             problemId, 
             language, 
             code,
-            pasteCount,      // Optional
-            timeSpentMs,     // Optional
-            totalKeyPresses, // Optional
-            isFinalSubmission // Optional - true for Submit button, false/undefined for Run button
+            userInput,       // New: User provided input for "Run Code"
+            pasteCount,
+            timeSpentMs,
+            totalKeyPresses,
+            isFinalSubmission
         } = req.body;
 
         // 1. Basic Validation
         if (!userId) return res.status(401).json({ error: 'Unauthorized: Missing User ID' });
         if (!problemId || !language || !code) return res.status(400).json({ error: 'All fields required' });
 
-        // 2. Verify User (Any registered user for demo)
-        const user = await users.get(userId);
-        if (!user) return res.status(401).json({ error: 'Unauthorized' });
+        // 2. Verify User
+        try {
+            const user = await users.get(userId);
+            if (!user) return res.status(401).json({ error: 'Unauthorized' });
+        } catch (e) {
+            console.error('User verification failed:', e.message);
+            return res.status(401).json({ error: 'Invalid User Session' });
+        }
 
         // 3. AI Detection Logic
-        // Run this BEFORE execution to save resources if needed, or largely parallel
-        const aiAnalysis = calculateAIScore(code, {
-            pasteCount: pasteCount || 0,
-            timeSpentMs: timeSpentMs || 0,
-            totalKeyPresses: totalKeyPresses || 0
-        });
+        let aiScore = 0;
+        let aiReasons = [];
+        try {
+            const aiAnalysis = calculateAIScore(code, {
+                pasteCount: pasteCount || 0,
+                timeSpentMs: timeSpentMs || 0,
+                totalKeyPresses: totalKeyPresses || 0
+            });
+            aiScore = aiAnalysis.score;
+            aiReasons = aiAnalysis.details;
+        } catch (e) {
+            console.error('AI Calculation Error:', e);
+            // Non-critical, continue with 0
+        }
 
-        const aiScore = aiAnalysis.score;
-        const aiReasons = aiAnalysis.details; // Optional: Store reason text if schema allows
-
-        // 4. Get Problem Details (for Test Cases)
-        const problem = await databases.getDocument(
-            process.env.APPWRITE_DATABASE_ID,
-            'problems',
-            problemId
-        );
-
-        if (!problem) return res.status(404).json({ error: 'Problem not found' });
+        // 4. Get Problem Details
+        let problem;
+        try {
+            problem = await databases.getDocument(
+                process.env.APPWRITE_DATABASE_ID,
+                'problems',
+                problemId
+            );
+        } catch (e) {
+            console.error('Problem Fetch Error:', e);
+            return res.status(404).json({ error: 'Problem not found or database error' });
+        }
 
         // Parse testCases
         let testCases = [];
@@ -118,80 +132,134 @@ const submitProblem = async (req, res) => {
             console.error('Error parsing test cases', e);
         }
 
+        // Determine Input to Use
+        // If Final Submission -> Use Test Case Input (Correctness Check)
+        // If Test Run -> Use User Input (if provided), else default to Test Case Input
         const firstTestCaseInput = testCases.length > 0 ? testCases[0].input : '';
+        let stdInToUse = firstTestCaseInput;
+        
+        if (!isFinalSubmission && userInput !== undefined && userInput !== null) {
+            stdInToUse = userInput;
+        }
+
+        // Validation: Warn if code expects input but none provided
+        // Matches: input(), Scanner, System.in, scanf, cin, getline, sys.stdin
+        const requiresInput = /input\(|Scanner|System\.in|scanf|cin|getline|sys\.stdin/.test(code);
+        
+        // Only trigger error if strictly empty and looks like it needs input
+        if (requiresInput && (!stdInToUse || !stdInToUse.toString().trim())) {
+            return res.status(400).json({
+                error: 'Input Required',
+                message: 'Your code appears to expect input, but no Input was provided.',
+                details: 'Please enter values in the "Custom Input" box below the editor.'
+            });
+        }
+
         const languageId = LANGUAGE_MAPPING[language];
 
         if (!languageId) return res.status(400).json({ error: 'Unsupported language' });
 
         // 5. Send to Judge0
-        const judge0Response = await axios.post(
-            'https://ce.judge0.com/submissions?base64_encoded=false&wait=true',
-            {
-                source_code: code,
-                language_id: languageId,
-                stdin: firstTestCaseInput
-            }
-        );
-
-        const result = judge0Response.data;
-        
-        // Extract Details
-        const executionTime = result.time ? parseFloat(result.time) : 0;
-        const status = result.status ? result.status.description : 'Unknown';
-        const stdout = result.stdout || '';
-        const stderr = result.stderr || '';
-        const compileOutput = result.compile_output || '';
-
-        // Check success
         let isSuccess = false;
-        if (testCases.length > 0) {
-            const expectedOutput = testCases[0].output.toString().trim();
-            const actualOutput = stdout.trim();
-            
-            console.log('Comparing outputs:');
-            console.log('Expected:', JSON.stringify(expectedOutput));
-            console.log('Actual:', JSON.stringify(actualOutput));
-            console.log('Status:', status);
-            
-            // More lenient comparison - check if outputs match
-            if (status === 'Accepted' && actualOutput === expectedOutput) {
-                isSuccess = true;
-            }
-        } else {
-             isSuccess = status === 'Accepted';
-        }
-        
-        console.log('Final isSuccess:', isSuccess);
+        let executionTime = 0;
+        let status = 'Unknown';
+        let stdout = '';
+        let stderr = '';
+        let compileOutput = '';
 
-        // 6. Save Submission to Appwrite (only for final submissions)
+        try {
+            // Helper for Base64
+            const toBase64 = (str) => Buffer.from(String(str || '')).toString('base64');
+            const fromBase64 = (str) => Buffer.from(String(str || ''), 'base64').toString('utf-8');
+
+            console.log('Preparing Judge0. Mode:', isFinalSubmission ? 'SUBMIT' : 'RUN');
+            console.log('Input:', stdInToUse);
+
+            const judge0Response = await axios.post(
+                'https://ce.judge0.com/submissions?base64_encoded=true&wait=true',
+                {
+                    source_code: toBase64(code),
+                    language_id: languageId,
+                    stdin: toBase64(stdInToUse)
+                }
+            );
+            
+            const result = judge0Response.data;
+            executionTime = result.time ? parseFloat(result.time) : 0;
+            status = result.status ? result.status.description : 'Unknown';
+            stdout = fromBase64(result.stdout);
+            stderr = fromBase64(result.stderr);
+            compileOutput = fromBase64(result.compile_output);
+
+            console.log('Judge0 Execution Result:', { status, stdout, stderr });
+
+            // Check success
+            if (testCases.length > 0) {
+                const expectedOutput = (testCases[0].output || '').toString().trim();
+                const actualOutput = stdout.trim();
+                
+                // Compare (relaxed)
+                if (status === 'Accepted' && actualOutput === expectedOutput) {
+                    isSuccess = true;
+                }
+            } else {
+                 isSuccess = status === 'Accepted';
+            }
+
+        } catch (e) {
+            console.error('Judge0 Execution Error:', e.message);
+            if (e.response) {
+                 console.error('Judge0 Response:', e.response.data);
+            }
+            // If execution fails, we might still want to return error to user instead of crashing
+            return res.status(502).json({ 
+                error: 'Code Execution Failed', 
+                message: 'Unable to execute code via Judge0. Is the API reachable?',
+                details: e.message
+            });
+        }
+
+        // 6. Save Submission to Appwrite
         let submissionId = null;
         
         if (isFinalSubmission) {
-            const submissionData = {
-                userId: userId,
-                problemId: problemId,
-                language: language,
-                code: code, // Save full code for final submission
-                executionTime: parseFloat(executionTime) || 0.0,
-                aiscore: parseInt(aiScore) || 0,
-                status: status || 'Unknown', 
-                output: (stdout || stderr || compileOutput || '')
-            };
+            try {
+                // TRUNCATE OUTPUT to prevent database errors (assuming 5000 char limit for safety)
+                const rawOutput = stdout || stderr || compileOutput || '';
+                const displayOutput = rawOutput.substring(0, 5000); 
 
-            console.log('Saving final submission:', submissionData);
+                const submissionData = {
+                    userId: userId,
+                    problemId: problemId,
+                    language: language,
+                    code: code, 
+                    executionTime: parseFloat(executionTime) || 0.0,
+                    aiscore: parseInt(aiScore) || 0,
+                    status: status || 'Unknown', 
+                    output: displayOutput
+                };
 
-            const newSubmission = await databases.createDocument(
-                process.env.APPWRITE_DATABASE_ID,
-                'submissions', 
-                ID.unique(),
-                submissionData
-            );
-            
-            submissionId = newSubmission.$id;
-        } else {
-            console.log('Test run - not saving to database');
-        }
+                console.log('Saving final submission:', submissionData);
 
+                const newSubmission = await databases.createDocument(
+                    process.env.APPWRITE_DATABASE_ID,
+                    'submissions', 
+                    ID.unique(),
+                    submissionData
+                );
+                
+                submissionId = newSubmission.$id;
+
+            } catch (e) {
+                console.error('Database Save Error:', e);
+                // Return 500 but with specific message
+                return res.status(500).json({ 
+                    error: 'Database Save Failed', 
+                    message: 'Could not save submission to database. Check Appwrite attributes.',
+                    details: e.message
+                });
+            }
+        } 
 
         return res.status(201).json({
             message: isFinalSubmission ? 'Solution submitted successfully' : 'Code executed (test run)',
@@ -257,7 +325,7 @@ const getStudentSubmissions = async (req, res) => {
             code: doc.code,
             status: doc.status,
             executionTime: doc.executionTime,
-            aiScore: doc.aiScore,
+            aiScore: doc.aiscore || 0,
             createdAt: doc.createdAt,
             output: doc.output
         }));

@@ -51,8 +51,12 @@ const calculateAIScore = (code, metadata) => {
     // --- 3. KEYPRESS RATIO (Medium Weight) ---
     // Rule: Code length usually matches keypresses (roughly).
     // If keypresses are significantly lower than code length, implies automated insertion.
-    if (totalKeyPresses > 0 && codeLength > 100) {
-        const ratio = totalKeyPresses / codeLength;
+    // --- 3. KEYPRESS RATIO (Medium Weight) ---
+    // Rule: Code length usually matches keypresses (roughly).
+    // If keypresses are significantly lower than code length, implies automated insertion.
+    if (codeLength > 100) {
+        // If 0 keypresses, ratio is 0.
+        const ratio = totalKeyPresses / codeLength; 
         if (ratio < 0.2) { // Less than 20% of chars were typed
             score += 30;
             heuristics.push('Low keypress-to-code ratio (+30)');

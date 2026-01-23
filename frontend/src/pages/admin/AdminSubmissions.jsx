@@ -21,8 +21,15 @@ const AdminSubmissions = () => {
                 
                 // Fetch all student submissions
                 const res = await axios.get('http://localhost:5000/admin/submissions', { headers });
-                setSubmissions(res.data.submissions);
-                setFilteredSubmissions(res.data.submissions);
+                
+                // DATA NORMALIZATION: Handle aiScore vs aiscore mismatch
+                const normalizedSubmissions = res.data.submissions.map(sub => ({
+                    ...sub,
+                    aiScore: sub.aiScore !== undefined ? sub.aiScore : (sub.aiscore !== undefined ? sub.aiscore : 0)
+                }));
+
+                setSubmissions(normalizedSubmissions);
+                setFilteredSubmissions(normalizedSubmissions);
 
             } catch (error) {
                 console.error('Error fetching submissions:', error);
